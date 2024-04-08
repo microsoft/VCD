@@ -23,7 +23,7 @@ Clone the repository and use one of the methods below to download the video clip
 
 ```bash
 git clone https://github.com/microsoft/VCD.git
-cd dwonload
+cd download
 ```
 ### Using Bash
 
