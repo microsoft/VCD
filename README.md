@@ -19,13 +19,13 @@ The Video Conferencing Dataset (VCD) is designed to evaluate video codecs for vi
 
 ## Download
 
-Clone the repository and use one of the methods below to download the video clips:
+Clone the repository and use *one of the methods* below to download the video clips:
 
 ```bash
 git clone https://github.com/microsoft/VCD.git
 cd download
 ```
-### Using Bash
+### Method 1: Using Bash
 
 Run the bash code to download the files in the current directory:
 
@@ -37,7 +37,7 @@ bash download-vcd1-yuv.sh
 bash download-vcd1-mp4.sh
 ```
 
-### Using python
+### Method 2: Using python
 
 1. Install the required libraries.
 
@@ -100,7 +100,7 @@ A scenario similar to the Talking Head but with heavy background blur.
 
 ## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
 the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
 
@@ -117,7 +117,7 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 Microsoft and any contributors grant you a license to the Microsoft documentation in this repository under the [Creative Commons Attribution 4.0 International Public License](https://creativecommons.org/licenses/by/4.0/legalcode),
 see the [LICENSE](LICENSE) file, grant you a license to any code in the repository under the [MIT License](https://opensource.org/licenses/MIT), see the
-[LICENSE-CODE](LICENSE-CODE) file, and grant you a license to dataset in the repository under the [XXXXX](), se the [LICENSE-DATA](LICENSE-DATA) file.
+[LICENSE-CODE](LICENSE-CODE) file, and grant you a license to dataset in the repository under the [Community Data License Agreement – Permissive, Version 2.0 - CDLA](https://cdla.dev/permissive-2-0/), see the [LICENSE-DATA](LICENSE-DATA) file.
 
 Microsoft, Windows, Microsoft Azure and/or other Microsoft products and services referenced in the
 documentation may be either trademarks or registered trademarks of Microsoft in the United States
@@ -132,7 +132,7 @@ or trademarks, whether by implication, estoppel or otherwise.
 
 ## Dataset license
 
-tba
+This dataset is released under the [Community Data License Agreement – Permissive, Version 2.0 - CDLA](https://cdla.dev/permissive-2-0/), see the [LICENSE-DATA](LICENSE-DATA) file.
 
 
 ## Code license
