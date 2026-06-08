@@ -1,12 +1,187 @@
-# Video Conferencing Dataset (VCD)
+# Video Conferencing Datasets (VCD)
+Datasets: [VCD2](#vcd2--camera-native-talking-head-dataset) | [VCD](#vcd--video-conferencing-dataset)
+
+This repository hosts two publicly available talking-head video datasets for video compression, quality assessment, super-resolution, and enhancement research.
 
 
-The Video Conferencing Dataset (VCD) is designed to evaluate video codecs for video conferencing. The VCD encompasses a broad range of camera qualities, along with spatial and temporal information. This dataset comprises 160 video clips, organized into four scenarios. Each sequence is presented in 1080p resolution, at 30 FPS, with a duration of 10 seconds, and features a person visible throughout the entire video. For further details, please refer to [VCD: A Video Conferencing Dataset for Video Compression](https://arxiv.org/abs/2309.07376).
+| Dataset | Clips | Duration | Resolution | Format | Paper |
+|---------|------:|----------|------------|--------|-------|
+| **VCD2** | 839 | 15 s each (~210 min total) | Native | FFV1 lossless | [arXiv (coming soon)](#) |
+| **VCD2-Benchmarking** | 120 | 10 s each | Native | FFV1 lossless | [arXiv (coming soon)](#) |
+| **VCD** | 160 | 10 s each | 1080p @ 30 FPS | YUV / MP4 | [ICASSP 2024](https://arxiv.org/abs/2309.07376) |
 
+---
 
-## Citation
+## VCD2 — Camera-Native Talking-Head Dataset
 
-```BibTex
+VCD2 is a camera-native dataset of 839 talking-head recordings captured from 805 participants using 446 unique consumer webcam devices in their natural environments. All recordings are stored using the FFV1 lossless codec, preserving the camera-native signal — uncompressed (24.4%) or MJPEG-encoded (75.6%) — without additional lossy processing.
+
+### Key features
+
+- **839 clips** (approximately 210 minutes), each 15 seconds in duration
+- **Lossless FFV1 encoding** preserving the camera-native signal
+- **446 unique webcam devices** across diverse environments
+- **Mean Opinion Score (MOS)** annotations and 10 perceptual quality tokens per clip
+- **Stratified benchmarking subset** of 120 clips in three content conditions: original talking head (TH), background blur (TH-BB), and background replacement (TH-BR)
+- **5× the scale** of VCD (839 vs. 160 clips) with lossless signal fidelity
+
+### Citation
+
+```BibTeX
+@inproceedings{naderi2026vcd2,
+  title={A Camera-Native Talking-Head Video Dataset for Various Computer Vision Tasks},
+  author={Naderi, Babak and Cutler, Ross and Khongbantabam, Nabakumar Singh},
+  booktitle={arXiv},
+  year={2026}
+}
+```
+
+### Download
+
+Clone the repository and use *one of the methods* below to download the video clips:
+
+```bash
+git clone https://github.com/microsoft/VCD.git
+cd download/vcd2
+```
+
+#### Method 1: Using Bash
+
+```bash
+# download raw dataset (839 clips, ~200 GB)
+bash download-vcd2-raw-mkv.sh
+
+# download benchmarking subset only (120 clips, ~30 GB)
+bash download-vcd2-benchmarking-mkv.sh
+```
+
+#### Method 2: Using Python
+
+1. Install the required libraries.
+
+```bash
+pip install -r requirements.txt
+```
+
+2. Change LOCAL_PATH to a path in your file system and run the following command. Use `--workers` to control parallelism (default: 8).
+
+```bash
+# download raw dataset
+python downloader.py --list-of-files raw_mkv_list.txt --local-path LOCAL_PATH
+
+# download benchmarking subset only
+python downloader.py --list-of-files benchmarking_mkv_list.txt --local-path LOCAL_PATH
+
+# use more parallel threads for faster download
+python downloader.py --list-of-files raw_mkv_list.txt --local-path LOCAL_PATH --workers 16
+```
+
+### Metadata
+
+The following metadata files are available in the repository (and hosted alongside the dataset):
+
+- [`vcd2_metadata.csv`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/vcd2_metadata.csv) — Full dataset metadata (839 clips): MOS, SI/TI, perceptual quality tokens, camera info, demographics
+- [`benchmarking-set_metadata.csv`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/benchmarking-set_metadata.csv) — Benchmarking subset metadata (120 clips): same columns plus group assignment
+- [`README.md`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/README.md) — Details about the above CSV files
+
+### Scenarios
+
+The benchmarking subset contains 120 clips organized into three groups of 40 clips each:
+
+#### 1. Talking Head (TH)
+Original clips without any post-processing, representing unmodified webcam-captured content.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/vcd2_atlas_TH.png" alt="VCD2 TH thumbnails" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/vcd2_siti_TH.png" alt="VCD2 TH SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+#### 2. Talking Head - Background Blur (TH-BB)
+Clips processed with a commercial-grade video conferencing background blur pipeline, simulating a common real-time processing scenario.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/vcd2_atlas_TH-BB.png" alt="VCD2 TH-BB thumbnails" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/vcd2_siti_TH-BB.png" alt="VCD2 TH-BB SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+#### 3. Talking Head - Background Replacement (TH-BR)
+Clips processed with a commercial-grade video conferencing background replacement pipeline using four popular virtual backgrounds.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/vcd2_atlas_TH-BR.png" alt="VCD2 TH-BR thumbnails" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/vcd2_siti_TH-BR.png" alt="VCD2 TH-BR SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+### Variable Frame Rate (VFR) Note
+
+The full raw dataset preserves original camera-native timestamps, which may include **Variable Frame Rate (VFR)** irregularities common with USB webcam captures. 
+
+The **benchmarking subset** has been corrected to **Constant Frame Rate (CFR)** using a lossless YUV roundtrip:
+
+1. Extract raw YUV pixels using `ffmpeg -fps_mode passthrough` (preserves all frames without duplication)
+2. Re-wrap into a new FFV1 MKV with evenly-spaced CFR timestamps at the rounded real frame rate
+
+This process is pixel-perfect — no frame duplication, dropping, or interpolation occurs.
+
+---
+
+## VCD — Video Conferencing Dataset
+
+The Video Conferencing Dataset (VCD) is designed to evaluate video codecs for video conferencing. VCD encompasses a broad range of camera qualities, along with spatial and temporal information. The dataset comprises 160 video clips organized into four scenarios. Each sequence is presented in 1080p resolution at 30 FPS, with a duration of 10 seconds, and features a person visible throughout the entire video.
+
+### Scenarios
+
+The dataset includes 160 videos organized into four scenarios with 40 clips each:
+
+#### 1. Talking Head (TH)
+40 webcam videos in a talking head scenario with at least 30% of clips featuring active speaking. Participants were asked to perform gestures, movements, or read a text during recording.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/s1_single.jpg" alt="TH thumbnail" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/si_ti_selected_s1.jpg" alt="TH SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+#### 2. Talking Head - Opaque Background (TH-OB)
+Similar to the Talking Head scenario, however, backgrounds are replaced with two popular backgrounds used in Teams.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/s2_single.jpg" alt="TH-OB thumbnail" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/si_ti_selected_s2.jpg" alt="TH-OB SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+#### 3. Talking Head - Background Blur (TH-BB)
+A scenario similar to the Talking Head but with heavy background blur.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/s3_single.jpg" alt="TH-BB thumbnail" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/si_ti_selected_s3.jpg" alt="TH-BB SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+#### 4. Talking Head - Mobile (TH-M)
+40 talking head videos recorded in a mobile scenario.
+
+<table>
+	<tr>
+		<td style="text-align:center"><img src="assets/s4_single.jpg" alt="TH-M thumbnail" style="width: 70%;" ></td>
+		<td style="text-align:center"><img src="assets/si_ti_selected_s4.jpg" alt="TH-M SI/TI" style="width: 70%;"></td>
+	</tr>
+</table>
+
+### Citation
+
+```BibTeX
 @inproceedings{naderi2024vcd,
   title={VCD: A Video Conferencing Dataset for Video Compression},
   author={Naderi, Babak and Cutler, Ross and Khongbantabam, Nabakumar Singh and Hosseinkashi, Yasaman and Turbell, Henrik and Sadovnikov, Albert and Zou, Quan},
@@ -17,7 +192,7 @@ The Video Conferencing Dataset (VCD) is designed to evaluate video codecs for vi
 }
 ```
 
-## Download
+### Download
 
 Clone the repository and use *one of the methods* below to download the video clips:
 
@@ -25,7 +200,8 @@ Clone the repository and use *one of the methods* below to download the video cl
 git clone https://github.com/microsoft/VCD.git
 cd download
 ```
-### Method 1: Using Bash
+
+#### Method 1: Using Bash
 
 Run the bash code to download the files in the current directory:
 
@@ -37,7 +213,7 @@ bash download-vcd1-yuv.sh
 bash download-vcd1-mp4.sh
 ```
 
-### Method 2: Using python
+#### Method 2: Using Python
 
 1. Install the required libraries.
 
@@ -51,52 +227,7 @@ pip install -r requirements.txt
 python downloader.py --list-of-files yuv_list.txt  --local-path LOCAL_PATH
 ```
 
-
-## Further details
-The dataset includes 160 videos, organized into four scenarios with 40 clips each:
-
-### 1. Talking Head (TH)
-40 webcam videos in a talking head scenario with at least 30% of clips featuring active speaking. Participants were asked to perform gestures, movements, or read a text during recording.
-
-<table>
-    <tr>
-        <td style="text-align:center"><img src="assets/s1_single.jpg" alt="TH thumbnail" style="width: 70%;" ></td>
-        <td style="text-align:center"><img src="assets/si_ti_selected_s1.jpg" alt="TH SI/TI" style="width: 70%;"></td>
-    </tr>
-</table>
-
-
-### 2. Talking Head - Opaque Background (TH-OB)
-Similar to the Talking Head scenario, however, backgrounds are replaced with two popular backgrounds used in Teams.
-
-
-<table>
-    <tr>
-        <td style="text-align:center"><img src="assets/s2_single.jpg" alt="TH-OB thumbnail" style="width: 70%;" ></td>
-        <td style="text-align:center"><img src="assets/si_ti_selected_s2.jpg" alt="TH-OB SI/TI" style="width: 70%;"></td>
-    </tr>
-</table>
-
-### 3. Talking Head - Background Blur (TH-BB)
-A scenario similar to the Talking Head but with heavy background blur.
-
-
-<table>
-    <tr>
-        <td style="text-align:center"><img src="assets/s3_single.jpg" alt="TH-BB thumbnail" style="width: 70%;" ></td>
-        <td style="text-align:center"><img src="assets/si_ti_selected_s3.jpg" alt="TH-BB SI/TI" style="width: 70%;"></td>
-    </tr>
-</table>
-
-### 4. Talking Head - Mobile (TH-M)
-40 talking head videos recorded in a mobile scenario.
-
-<table>
-    <tr>
-        <td style="text-align:center"><img src="assets/s4_single.jpg" alt="TH-M thumbnail" style="width: 70%;" ></td>
-        <td style="text-align:center"><img src="assets/si_ti_selected_s4.jpg" alt="TH-M SI/TI" style="width: 70%;"></td>
-    </tr>
-</table>
+---
 
 ## Contributing
 
@@ -112,8 +243,9 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
+---
 
-# Legal Notices
+## Legal Notices
 
 Microsoft and any contributors grant you a license to the Microsoft documentation in this repository under the [Creative Commons Attribution 4.0 International Public License](https://creativecommons.org/licenses/by/4.0/legalcode),
 see the [LICENSE](LICENSE) file, grant you a license to any code in the repository under the [MIT License](https://opensource.org/licenses/MIT), see the
@@ -130,12 +262,11 @@ Privacy information can be found at https://privacy.microsoft.com/en-us/
 Microsoft and any contributors reserve all other rights, whether under their respective copyrights, patents,
 or trademarks, whether by implication, estoppel or otherwise.
 
-## Dataset license
+### Dataset license
 
 This dataset is released under the [Community Data License Agreement – Permissive, Version 2.0 - CDLA](https://cdla.dev/permissive-2-0/), see the [LICENSE-DATA](LICENSE-DATA) file.
 
-
-## Code license
+### Code license
 
 MIT License
 
@@ -159,11 +290,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE
 
-
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
+trademarks or logos is subject to and must follow
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.
