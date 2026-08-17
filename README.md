@@ -6,33 +6,36 @@ This repository hosts two publicly available talking-head video datasets for vid
 
 | Dataset | Clips | Duration | Resolution | Format | Paper |
 |---------|------:|----------|------------|--------|-------|
-| **VCD2** | 839 | 15 s each (~210 min total) | Native | FFV1 lossless | [arXiv (coming soon)](#) |
-| **VCD2-Benchmarking** | 120 | 10 s each | Native | FFV1 lossless | [arXiv (coming soon)](#) |
+| **VCD2** | 838 | 15 s each (~210 min total) | Native | FFV1 lossless | [arXiv](https://arxiv.org/abs/2603.26763) |
+| **VCD2-Benchmarking** | 120 | 10 s each | Native | FFV1 lossless | [arXiv](https://arxiv.org/abs/2603.26763) |
 | **VCD** | 160 | 10 s each | 1080p @ 30 FPS | YUV / MP4 | [ICASSP 2024](https://arxiv.org/abs/2309.07376) |
 
 ---
 
 ## VCD2 — Camera-Native Talking-Head Dataset
 
-VCD2 is a camera-native dataset of 839 talking-head recordings captured from 805 participants using 446 unique consumer webcam devices in their natural environments. All recordings are stored using the FFV1 lossless codec, preserving the camera-native signal — uncompressed (24.4%) or MJPEG-encoded (75.6%) — without additional lossy processing.
+VCD2 is a camera-native dataset of 838 talking-head recordings captured from 799 participants across 443 camera-code categories in their natural environments. All recordings are stored using the FFV1 lossless codec, preserving the camera-native signal — uncompressed (24.7%) or MJPEG-encoded (75.3%) — without additional lossy processing.
 
 ### Key features
 
-- **839 clips** (approximately 210 minutes), each 15 seconds in duration
+- **838 clips** (approximately 210 minutes), each 15 seconds in duration
 - **Lossless FFV1 encoding** preserving the camera-native signal
-- **446 unique webcam devices** across diverse environments
+- **443 camera-code categories** across diverse environments
 - **Mean Opinion Score (MOS)** annotations and 10 perceptual quality tokens per clip
 - **Stratified benchmarking subset** of 120 clips in three content conditions: original talking head (TH), background blur (TH-BB), and background replacement (TH-BR)
-- **5× the scale** of VCD (839 vs. 160 clips) with lossless signal fidelity
+- **5× the scale** of VCD (838 vs. 160 clips) while preserving the camera-native signal without additional lossy compression
 
 ### Citation
 
 ```BibTeX
-@inproceedings{naderi2026vcd2,
+@misc{naderi2026vcd2,
   title={A Camera-Native Talking-Head Video Dataset for Various Computer Vision Tasks},
   author={Naderi, Babak and Cutler, Ross and Khongbantabam, Nabakumar Singh},
-  booktitle={arXiv},
-  year={2026}
+  year={2026},
+  eprint={2603.26763},
+  archivePrefix={arXiv},
+  primaryClass={cs.CV},
+  url={https://arxiv.org/abs/2603.26763}
 }
 ```
 
@@ -42,13 +45,13 @@ Clone the repository and use *one of the methods* below to download the video cl
 
 ```bash
 git clone https://github.com/microsoft/VCD.git
-cd download/vcd2
+cd VCD/download/vcd2
 ```
 
 #### Method 1: Using Bash
 
 ```bash
-# download raw dataset (839 clips, ~200 GB)
+# download raw dataset (838 clips, ~200 GB)
 bash download-vcd2-raw-mkv.sh
 
 # download benchmarking subset only (120 clips, ~30 GB)
@@ -78,9 +81,9 @@ python downloader.py --list-of-files raw_mkv_list.txt --local-path LOCAL_PATH --
 
 ### Metadata
 
-The following metadata files are available in the repository (and hosted alongside the dataset):
+The following metadata files are hosted alongside the dataset:
 
-- [`vcd2_metadata.csv`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/vcd2_metadata.csv) — Full dataset metadata (839 clips): MOS, SI/TI, perceptual quality tokens, camera info, demographics
+- [`vcd2_metadata.csv`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/vcd2_metadata.csv) — Full dataset metadata (838 clips): MOS, SI/TI, perceptual quality tokens, camera info, demographics
 - [`benchmarking-set_metadata.csv`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/benchmarking-set_metadata.csv) — Benchmarking subset metadata (120 clips): same columns plus group assignment
 - [`README.md`](https://vcdpublic.blob.core.windows.net/vcd2/metadata/README.md) — Details about the above CSV files
 
@@ -198,7 +201,7 @@ Clone the repository and use *one of the methods* below to download the video cl
 
 ```bash
 git clone https://github.com/microsoft/VCD.git
-cd download
+cd VCD/download
 ```
 
 #### Method 1: Using Bash

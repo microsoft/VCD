@@ -1,42 +1,97 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-import os
-import requests
-import time
 import argparse
+from pathlib import Path
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+def create_session():
+    retries = Retry(
+        total=5,
+        connect=5,
+        read=5,
+        status=5,
+        backoff_factor=1,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    return session
+
 
 def download_files(file_list, download_dir):
     base = "https://vcdpublic.blob.core.windows.net/vcd1"
-    if not os.path.exists(download_dir):
-        os.makedirs(download_dir)
+    download_dir.mkdir(parents=True, exist_ok=True)
+    paths = [
+        line.strip()
+        for line in file_list.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip()
+    ]
+    if len(paths) != len(set(paths)):
+        raise ValueError(f"{file_list} contains duplicate paths")
 
-    with open(file_list, 'r') as f:
-        lines = f.readlines()
-        for line in lines:
-            file_path = line.strip()            
-            url = base + '/' +file_path
-            filename = url.split('/')[-1]
-            print('Downloading', filename)
-            # make sure base[:-1] path exists            
-            os.makedirs(os.path.join(download_dir, "/".join(file_path.split('/')[:-1]) ), exist_ok=True)
-            r = requests.get(url, stream=True)
-            with open(os.path.join(download_dir, file_path), 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
-            time.sleep(1)
+    failures = []
+    session = create_session()
+    for index, file_path in enumerate(paths, start=1):
+        url = base + "/" + file_path
+        destination = download_dir.joinpath(*file_path.split("/"))
+        temporary = destination.with_suffix(destination.suffix + ".part")
+        if destination.is_file():
+            print(f"[{index}/{len(paths)}] Skip (exists): {file_path}")
+            continue
 
-    print('Download complete')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with session.get(
+                url, stream=True, timeout=(30, 300)
+            ) as response:
+                response.raise_for_status()
+                expected = response.headers.get("Content-Length")
+                expected = int(expected) if expected is not None else None
+                written = 0
+                with temporary.open("wb") as handle:
+                    for chunk in response.iter_content(
+                        chunk_size=1024 * 1024
+                    ):
+                        if chunk:
+                            handle.write(chunk)
+                            written += len(chunk)
+                if expected is not None and written != expected:
+                    raise OSError(
+                        f"expected {expected} bytes but received {written}"
+                    )
+            temporary.replace(destination)
+            print(f"[{index}/{len(paths)}] OK: {file_path}")
+        except (requests.RequestException, OSError) as error:
+            if temporary.exists():
+                temporary.unlink()
+            failures.append(file_path)
+            print(f"[{index}/{len(paths)}] FAILED: {file_path} ({error})")
 
-if __name__ == '__main__':
-    
-    parser = argparse.ArgumentParser(description='Utility script to evaluate answers to the pcrowd batch')
-    # Configuration: read it from mturk.cfg
-    parser.add_argument("--list-of-files", required=True,
-                        help="List of files to download")
-    parser.add_argument("--local-path", required=True,
-                        help="Local path to download the files to")
+    print(f"Done. Success: {len(paths) - len(failures)}, Failed: {len(failures)}")
+    return len(failures)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Download VCD dataset files")
+    parser.add_argument(
+        "--list-of-files",
+        type=Path,
+        required=True,
+        help="Path to the file list",
+    )
+    parser.add_argument(
+        "--local-path",
+        type=Path,
+        required=True,
+        help="Local directory to download files to",
+    )
     args = parser.parse_args()
-
-    download_files(args.list_of_files, args.local_path)
+    failures = download_files(args.list_of_files, args.local_path)
+    raise SystemExit(1 if failures else 0)
