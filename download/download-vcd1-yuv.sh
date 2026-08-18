@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
+# Licensed under the MIT license.
 
 set -euo pipefail
 
