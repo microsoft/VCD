@@ -138,6 +138,10 @@ This process is pixel-perfect — no frame duplication, dropping, or interpolati
 
 The Video Conferencing Dataset (VCD) is designed to evaluate video codecs for video conferencing. VCD encompasses a broad range of camera qualities, along with spatial and temporal information. The dataset comprises 160 video clips organized into four scenarios. Each sequence is presented in 1080p resolution at 30 FPS, with a duration of 10 seconds, and features a person visible throughout the entire video.
 
+### Capture and frame-rate note
+
+VCD was recorded using a WebRTC-based capture pipeline. As a result, some clips may have undergone MP4/H.264 or VP8 encoding during capture, and some clips may contain interpolated frames introduced when producing a constant frame rate of 30 FPS. These characteristics should be considered when using VCD for compression, temporal, or frame-level analysis.
+
 ### Scenarios
 
 The dataset includes 160 videos organized into four scenarios with 40 clips each:
