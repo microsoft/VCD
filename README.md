@@ -142,6 +142,10 @@ The Video Conferencing Dataset (VCD) is designed to evaluate video codecs for vi
 
 VCD was recorded using a WebRTC-based capture pipeline. As a result, some clips may have undergone MP4/H.264 or VP8 encoding during capture, and some clips may contain interpolated frames introduced when producing a constant frame rate of 30 FPS. These characteristics should be considered when using VCD for compression, temporal, or frame-level analysis.
 
+### Metadata
+
+Metadata describing the dataset is available in [`Video_Conferencing_Dataset.csv`](https://vcdpublic.blob.core.windows.net/vcd1/Video_Conferencing_Dataset.csv)
+
 ### Scenarios
 
 The dataset includes 160 videos organized into four scenarios with 40 clips each:
