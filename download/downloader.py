@@ -27,7 +27,6 @@ def create_session():
 
 def download_files(file_list, download_dir):
     base = "https://vcdpublic.blob.core.windows.net/vcd1"
-    download_dir.mkdir(parents=True, exist_ok=True)
     paths = [
         line.strip()
         for line in file_list.read_text(encoding="utf-8-sig").splitlines()
@@ -35,7 +34,15 @@ def download_files(file_list, download_dir):
     ]
     if len(paths) != len(set(paths)):
         raise ValueError(f"{file_list} contains duplicate paths")
+    for file_path in paths:
+        if (
+            "\\" in file_path
+            or ":" in file_path
+            or any(part in ("", ".", "..") for part in file_path.split("/"))
+        ):
+            raise ValueError(f"{file_list} contains an unsafe path: {file_path!r}")
 
+    download_dir.mkdir(parents=True, exist_ok=True)
     failures = []
     session = create_session()
     for index, file_path in enumerate(paths, start=1):

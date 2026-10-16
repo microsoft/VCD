@@ -83,8 +83,6 @@ def download_one(file_path, download_dir, index, total):
 
 
 def download_files(file_list, download_dir, workers):
-    download_dir.mkdir(parents=True, exist_ok=True)
-
     lines = [
         line.strip()
         for line in file_list.read_text(encoding="utf-8-sig").splitlines()
@@ -92,7 +90,15 @@ def download_files(file_list, download_dir, workers):
     ]
     if len(lines) != len(set(lines)):
         raise ValueError(f"{file_list} contains duplicate paths")
+    for file_path in lines:
+        if (
+            "\\" in file_path
+            or ":" in file_path
+            or any(part in ("", ".", "..") for part in file_path.split("/"))
+        ):
+            raise ValueError(f"{file_list} contains an unsafe path: {file_path!r}")
 
+    download_dir.mkdir(parents=True, exist_ok=True)
     total = len(lines)
     print(f"Files to download: {total}, workers: {workers}")
 

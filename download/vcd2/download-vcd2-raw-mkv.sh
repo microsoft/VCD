@@ -15,6 +15,12 @@ OUT_DIR="${OUT_DIR:-./vcd2}"
 while IFS= read -r BLOB || [[ -n "$BLOB" ]]; do
     BLOB="${BLOB%$'\r'}"
     [ -z "$BLOB" ] && continue
+    case "/$BLOB/" in
+        *"/../"*|*"/./"*|*"//"*|*\\*|*:*)
+            printf 'Unsafe path in %s: %s\n' "$LIST_FILE" "$BLOB" >&2
+            exit 1
+            ;;
+    esac
     URL="$AZURE_URL/$BLOB"
     DES="$OUT_DIR/$BLOB"
     TMP="$DES.part"
