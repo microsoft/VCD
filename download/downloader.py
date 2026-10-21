@@ -3,6 +3,7 @@
 
 import argparse
 from pathlib import Path
+from time import sleep
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -55,31 +56,49 @@ def download_files(file_list, download_dir):
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with session.get(
-                url, stream=True, timeout=(30, 300)
-            ) as response:
-                response.raise_for_status()
-                expected = response.headers.get("Content-Length")
-                expected = int(expected) if expected is not None else None
-                written = 0
-                with temporary.open("wb") as handle:
-                    for chunk in response.iter_content(
-                        chunk_size=1024 * 1024
-                    ):
-                        if chunk:
-                            handle.write(chunk)
-                            written += len(chunk)
-                if expected is not None and written != expected:
-                    raise OSError(
-                        f"expected {expected} bytes but received {written}"
+            for attempt in range(6):
+                try:
+                    with session.get(
+                        url, stream=True, timeout=(30, 300)
+                    ) as response:
+                        response.raise_for_status()
+                        expected = response.headers.get("Content-Length")
+                        expected = int(expected) if expected is not None else None
+                        written = 0
+                        with temporary.open("wb") as handle:
+                            for chunk in response.iter_content(
+                                chunk_size=1024 * 1024
+                            ):
+                                if chunk:
+                                    handle.write(chunk)
+                                    written += len(chunk)
+                        if expected is not None and written != expected:
+                            raise requests.exceptions.ChunkedEncodingError(
+                                f"expected {expected} bytes but received {written}"
+                            )
+                    break
+                except (
+                    requests.ConnectionError,
+                    requests.Timeout,
+                    requests.exceptions.ChunkedEncodingError,
+                    requests.exceptions.ContentDecodingError,
+                ) as error:
+                    if attempt == 5:
+                        raise
+                    temporary.unlink(missing_ok=True)
+                    delay = 2 ** attempt
+                    print(
+                        f"[{index}/{len(paths)}] Retry {attempt + 1}/5 "
+                        f"in {delay}s: {file_path} ({error})"
                     )
+                    sleep(delay)
             temporary.replace(destination)
             print(f"[{index}/{len(paths)}] OK: {file_path}")
         except (requests.RequestException, OSError) as error:
-            if temporary.exists():
-                temporary.unlink()
             failures.append(file_path)
             print(f"[{index}/{len(paths)}] FAILED: {file_path} ({error})")
+        finally:
+            temporary.unlink(missing_ok=True)
 
     print(f"Done. Success: {len(paths) - len(failures)}, Failed: {len(failures)}")
     return len(failures)
