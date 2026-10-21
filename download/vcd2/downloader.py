@@ -8,6 +8,13 @@ from threading import Event, Lock, local
 
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.exceptions import (
+    DecodeError,
+    InvalidHeader,
+    ProtocolError,
+    ReadTimeoutError,
+    SSLError,
+)
 from urllib3.util.retry import Retry
 
 AZURE_BASE = "https://vcdpublic.blob.core.windows.net/vcd2"
@@ -24,16 +31,8 @@ def positive_int(value):
 
 def get_session():
     if not hasattr(thread_state, "session"):
-        retries = Retry(
-            total=5,
-            connect=5,
-            read=5,
-            status=5,
-            backoff_factor=1,
-            status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset({"GET"}),
-        )
-        adapter = HTTPAdapter(max_retries=retries)
+        # Keep retries at the file level so cancellation also interrupts backoff.
+        adapter = HTTPAdapter(max_retries=0)
         session = requests.Session()
         session.mount("https://", adapter)
         thread_state.session = session
@@ -50,32 +49,40 @@ def download_one(file_path, download_dir, index, total, stop_event=None):
     destination = download_dir.joinpath(*file_path.split("/"))
     temporary = destination.with_suffix(destination.suffix + ".part")
 
-    if destination.is_file():
-        with print_lock:
-            print(f"[{index}/{total}] Skip (exists): {file_path}")
-        return file_path, True
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
     try:
+        if destination.is_file():
+            with print_lock:
+                print(f"[{index}/{total}] Skip (exists): {file_path}")
+            return file_path, True
+        destination.parent.mkdir(parents=True, exist_ok=True)
         for attempt in range(6):
             if stop_event.is_set():
                 raise CancelledError()
             try:
                 with get_session().get(
-                    url, stream=True, timeout=(30, 300)
+                    url, stream=True, timeout=(5, 2)
                 ) as response:
                     response.raise_for_status()
                     expected = response.headers.get("Content-Length")
                     expected = int(expected) if expected is not None else None
                     written = 0
                     with temporary.open("wb") as handle:
-                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        while True:
                             if stop_event.is_set():
                                 raise CancelledError()
-                            if chunk:
-                                handle.write(chunk)
-                                written += len(chunk)
+                            try:
+                                # read1 returns available data instead of waiting for a full chunk.
+                                chunk = response.raw.read1(
+                                    1024 * 1024, decode_content=True
+                                )
+                            except (
+                                DecodeError, ProtocolError, ReadTimeoutError, SSLError
+                            ) as error:
+                                raise requests.ConnectionError(error) from error
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+                            written += len(chunk)
                     if expected is not None and written != expected:
                         raise requests.exceptions.ChunkedEncodingError(
                             f"expected {expected} bytes but received {written}"
@@ -86,11 +93,28 @@ def download_one(file_path, download_dir, index, total, stop_event=None):
                 requests.Timeout,
                 requests.exceptions.ChunkedEncodingError,
                 requests.exceptions.ContentDecodingError,
+                requests.HTTPError,
             ) as error:
+                if stop_event.is_set():
+                    raise CancelledError() from error
+                if isinstance(error, requests.HTTPError):
+                    if error.response is None or error.response.status_code not in (
+                        429, 500, 502, 503, 504
+                    ):
+                        raise
                 if attempt == 5:
                     raise
                 temporary.unlink(missing_ok=True)
                 delay = 2 ** attempt
+                if isinstance(error, requests.HTTPError):
+                    retry_after = error.response.headers.get("Retry-After")
+                    if retry_after is not None:
+                        try:
+                            delay = Retry().parse_retry_after(retry_after)
+                        except InvalidHeader as header_error:
+                            raise requests.exceptions.InvalidHeader(
+                                str(header_error)
+                            ) from header_error
                 with print_lock:
                     print(
                         f"[{index}/{total}] Retry {attempt + 1}/5 "
@@ -109,7 +133,11 @@ def download_one(file_path, download_dir, index, total, stop_event=None):
             print(f"[{index}/{total}] FAILED: {file_path} ({error})")
         return file_path, False
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError as error:
+            with print_lock:
+                print(f"FAILED to remove partial file {temporary}: {error}")
 
 
 def download_files(file_list, download_dir, workers):

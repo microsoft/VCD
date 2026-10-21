@@ -50,8 +50,8 @@ def download_files(file_list, download_dir):
         url = base + "/" + file_path
         destination = download_dir.joinpath(*file_path.split("/"))
         temporary = destination.with_suffix(destination.suffix + ".part")
-        destination.parent.mkdir(parents=True, exist_ok=True)
         try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.is_file():
                 with session.head(
                     url, allow_redirects=True, timeout=(30, 300)
@@ -107,7 +107,10 @@ def download_files(file_list, download_dir):
             failures.append(file_path)
             print(f"[{index}/{len(paths)}] FAILED: {file_path} ({error})")
         finally:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as error:
+                print(f"FAILED to remove partial file {temporary}: {error}")
 
     print(f"Done. Success: {len(paths) - len(failures)}, Failed: {len(failures)}")
     return len(failures)

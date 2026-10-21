@@ -4,11 +4,13 @@
 import contextlib
 import importlib.util
 import io
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from threading import Event
+from threading import Event, Thread
+from time import monotonic, sleep
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -83,9 +85,7 @@ class PythonDownloaderTests(unittest.TestCase):
                     manifest.write_bytes(b"\xef\xbb\xbfraw/mkv/clip.mkv\r\n\r\n")
                     output = base / "output"
                     session = MagicMock()
-                    response = session.get.return_value.__enter__.return_value
-                    response.headers = {"Content-Length": "4"}
-                    response.iter_content.return_value = [b"test"]
+                    session.get.return_value = self.response()
                     self.assertEqual(
                         self.download(module, factory, manifest, output, session), 0
                     )
@@ -111,6 +111,8 @@ class PythonDownloaderTests(unittest.TestCase):
                 raise error
 
         response.iter_content.side_effect = stream
+        iterator = stream(1024 * 1024)
+        response.raw.read1.side_effect = lambda *args, **kwargs: next(iterator, b"")
         return response
 
     def test_retries_interrupted_or_incomplete_streams_from_scratch(self):
@@ -301,6 +303,8 @@ class PythonDownloaderTests(unittest.TestCase):
                 raise KeyboardInterrupt()
 
             response.iter_content.side_effect = stream
+            iterator = stream(1024 * 1024)
+            response.raw.read1.side_effect = lambda *args, **kwargs: next(iterator, b"")
             session.get.return_value = response
             with patch.object(module, "Event", return_value=stop_event):
                 with patch.object(module, "as_completed", side_effect=interrupt):
@@ -313,7 +317,7 @@ class PythonDownloaderTests(unittest.TestCase):
             self.assertEqual(list(output.rglob("*.mkv")), [])
 
             session.get.reset_mock()
-            session.get.return_value = self.response()
+            session.get.side_effect = [self.response() for _ in range(3)]
             self.assertEqual(
                 self.download(module, factory, manifest, output, session), 0
             )
@@ -338,6 +342,177 @@ class PythonDownloaderTests(unittest.TestCase):
             session.get.assert_called_once()
             self.assertEqual(list(output.rglob("*.part")), [])
             self.assertEqual(list(output.rglob("*.mkv")), [])
+
+    def test_directory_and_partial_cleanup_errors_do_not_abort_later_files(self):
+        for relative, module, factory in self.modules:
+            with self.subTest(script=relative):
+                with tempfile.TemporaryDirectory() as directory:
+                    base = Path(directory)
+                    manifest = base / "manifest.txt"
+                    manifest.write_text(
+                        "blocked/clip.mkv\nraw/good.mkv\n", encoding="utf-8"
+                    )
+                    output = base / "output"
+                    original_mkdir = Path.mkdir
+                    original_unlink = Path.unlink
+
+                    def mkdir(path, *args, **kwargs):
+                        if path == output / "blocked":
+                            raise PermissionError("cannot create directory")
+                        return original_mkdir(path, *args, **kwargs)
+
+                    def unlink(path, *args, **kwargs):
+                        if path == output / "blocked/clip.mkv.part":
+                            raise PermissionError("cannot access partial file")
+                        return original_unlink(path, *args, **kwargs)
+
+                    session = MagicMock()
+                    session.get.return_value = self.response()
+                    with patch.object(Path, "mkdir", mkdir):
+                        with patch.object(Path, "unlink", unlink):
+                            failures = self.download(
+                                module, factory, manifest, output, session
+                            )
+                    self.assertEqual(failures, 1)
+                    session.get.assert_called_once()
+                    self.assertEqual((output / "raw/good.mkv").read_bytes(), b"test")
+
+    def test_vcd2_retries_transient_http_errors_with_cancellable_retry_after(self):
+        _, module, factory = self.modules[1]
+        for status in (429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                with tempfile.TemporaryDirectory() as directory:
+                    base = Path(directory)
+                    manifest = base / "manifest.txt"
+                    manifest.write_text("raw/clip.mkv\n", encoding="utf-8")
+                    output = base / "output"
+                    response = self.response()
+                    response.status_code = status
+                    response.headers["Retry-After"] = "7"
+                    response.raise_for_status.side_effect = module.requests.HTTPError(
+                        str(status), response=response
+                    )
+                    session = MagicMock()
+                    session.get.side_effect = [response, self.response()]
+                    with self.retry_wait(module) as wait:
+                        failures = self.download(module, factory, manifest, output, session)
+                    self.assertEqual(failures, 0)
+                    wait.assert_called_once_with(7)
+                    self.assertEqual((output / "raw/clip.mkv").read_bytes(), b"test")
+
+    def test_vcd2_interrupts_real_stalled_http_requests(self):
+        _, module, factory = self.modules[1]
+        for stall in ("body", "trickle", "headers"):
+            with self.subTest(stall=stall):
+                release = Event()
+                requested = Event()
+
+                class Handler(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        if stall != "headers":
+                            self.send_response(200)
+                            self.send_header("Content-Length", str(2 * 1024 * 1024))
+                            self.end_headers()
+                            self.wfile.write(b"start")
+                            self.wfile.flush()
+                        requested.set()
+                        if stall == "trickle":
+                            until = monotonic() + 10
+                            while not release.wait(0.1) and monotonic() < until:
+                                self.wfile.write(b"more")
+                                self.wfile.flush()
+                        else:
+                            release.wait(10)
+
+                    def log_message(self, *args):
+                        pass
+
+                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                server_thread = Thread(target=server.serve_forever, daemon=True)
+                server_thread.start()
+                stop_event = Event()
+
+                def interrupt(futures):
+                    if not requested.wait(5):
+                        raise AssertionError("HTTP request did not reach the server")
+                    if stall != "headers":
+                        sleep(0.1)
+                    raise KeyboardInterrupt()
+
+                try:
+                    with tempfile.TemporaryDirectory() as directory:
+                        base = Path(directory)
+                        manifest = base / "manifest.txt"
+                        manifest.write_text(
+                            "raw/active.mkv\nraw/queued.mkv\n", encoding="utf-8"
+                        )
+                        output = base / "output"
+                        with module.requests.Session() as session:
+                            session.trust_env = False
+                            with contextlib.ExitStack() as stack:
+                                stack.enter_context(patch.object(
+                                    module, "AZURE_BASE",
+                                    f"http://127.0.0.1:{server.server_port}",
+                                ))
+                                stack.enter_context(patch.object(
+                                    module, "Event", return_value=stop_event
+                                ))
+                                stack.enter_context(patch.object(
+                                    module, "as_completed", side_effect=interrupt
+                                ))
+                                started = monotonic()
+                                with self.assertRaises(KeyboardInterrupt):
+                                    self.download(
+                                        module, factory, manifest, output, session
+                                    )
+                                elapsed = monotonic() - started
+                        self.assertLess(elapsed, 3)
+                        self.assertEqual(list(output.rglob("*.part")), [])
+                        self.assertEqual(list(output.rglob("*.mkv")), [])
+                finally:
+                    release.set()
+                    server.shutdown()
+                    server.server_close()
+                    server_thread.join(timeout=5)
+
+    def test_vcd2_downloads_complete_files_over_real_http(self):
+        _, module, factory = self.modules[1]
+        content = b"test" * (512 * 1024) + b"end"
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server_thread = Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                manifest = base / "manifest.txt"
+                manifest.write_text("raw/clip.mkv\n", encoding="utf-8")
+                output = base / "output"
+                with module.requests.Session() as session:
+                    session.trust_env = False
+                    with patch.object(
+                        module, "AZURE_BASE",
+                        f"http://127.0.0.1:{server.server_port}",
+                    ):
+                        self.assertEqual(
+                            self.download(module, factory, manifest, output, session), 0
+                        )
+                self.assertEqual((output / "raw/clip.mkv").read_bytes(), content)
+                self.assertEqual(list(output.rglob("*.part")), [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=5)
 
 
 class ShellDownloaderTests(unittest.TestCase):
