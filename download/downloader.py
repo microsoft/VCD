@@ -18,7 +18,7 @@ def create_session():
         status=5,
         backoff_factor=1,
         status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET"}),
+        allowed_methods=frozenset({"GET", "HEAD"}),
     )
     adapter = HTTPAdapter(max_retries=retries)
     session = requests.Session()
@@ -50,12 +50,21 @@ def download_files(file_list, download_dir):
         url = base + "/" + file_path
         destination = download_dir.joinpath(*file_path.split("/"))
         temporary = destination.with_suffix(destination.suffix + ".part")
-        if destination.is_file():
-            print(f"[{index}/{len(paths)}] Skip (exists): {file_path}")
-            continue
-
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
+            if destination.is_file():
+                with session.head(
+                    url, allow_redirects=True, timeout=(30, 300)
+                ) as response:
+                    response.raise_for_status()
+                    expected = response.headers.get("Content-Length")
+                if expected is not None and destination.stat().st_size == int(expected):
+                    print(f"[{index}/{len(paths)}] Skip (size verified): {file_path}")
+                    continue
+                print(
+                    f"[{index}/{len(paths)}] Re-download "
+                    f"(size differs or unavailable): {file_path}"
+                )
             for attempt in range(6):
                 try:
                     with session.get(

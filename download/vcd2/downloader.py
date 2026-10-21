@@ -2,10 +2,9 @@
 # Licensed under the MIT license.
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from pathlib import Path
-from threading import Lock, local
-from time import sleep
+from threading import Event, Lock, local
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -41,8 +40,12 @@ def get_session():
     return thread_state.session
 
 
-def download_one(file_path, download_dir, index, total):
+def download_one(file_path, download_dir, index, total, stop_event=None):
     """Download a single file. Returns (file_path, success)."""
+    if stop_event is None:
+        stop_event = Event()
+    if stop_event.is_set():
+        raise CancelledError()
     url = AZURE_BASE + "/" + file_path
     destination = download_dir.joinpath(*file_path.split("/"))
     temporary = destination.with_suffix(destination.suffix + ".part")
@@ -56,6 +59,8 @@ def download_one(file_path, download_dir, index, total):
 
     try:
         for attempt in range(6):
+            if stop_event.is_set():
+                raise CancelledError()
             try:
                 with get_session().get(
                     url, stream=True, timeout=(30, 300)
@@ -66,6 +71,8 @@ def download_one(file_path, download_dir, index, total):
                     written = 0
                     with temporary.open("wb") as handle:
                         for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if stop_event.is_set():
+                                raise CancelledError()
                             if chunk:
                                 handle.write(chunk)
                                 written += len(chunk)
@@ -89,7 +96,10 @@ def download_one(file_path, download_dir, index, total):
                         f"[{index}/{total}] Retry {attempt + 1}/5 "
                         f"in {delay}s: {file_path} ({error})"
                     )
-                sleep(delay)
+                if stop_event.wait(delay):
+                    raise CancelledError()
+        if stop_event.is_set():
+            raise CancelledError()
         temporary.replace(destination)
         with print_lock:
             print(f"[{index}/{total}] OK: {file_path}")
@@ -126,9 +136,11 @@ def download_files(file_list, download_dir, workers):
     failed = 0
     failed_files = []
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    stop_event = Event()
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
         futures = {
-            executor.submit(download_one, path, download_dir, i, total): path
+            executor.submit(download_one, path, download_dir, i, total, stop_event): path
             for i, path in enumerate(lines, start=1)
         }
         for future in as_completed(futures):
@@ -138,6 +150,13 @@ def download_files(file_list, download_dir, workers):
             else:
                 failed += 1
                 failed_files.append(path)
+    except KeyboardInterrupt:
+        with print_lock:
+            print("\nInterrupted. Cancelling remaining downloads.")
+        raise
+    finally:
+        stop_event.set()
+        executor.shutdown(wait=True, cancel_futures=True)
 
     print(f"\nDone. Success: {success}, Failed: {failed}")
     if failed_files:

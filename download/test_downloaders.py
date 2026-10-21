@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from threading import Event
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -46,6 +47,18 @@ class PythonDownloaderTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 return module.download_files(*args)
 
+    @contextlib.contextmanager
+    def retry_wait(self, module, callback=None):
+        if hasattr(module, "sleep"):
+            with patch.object(module, "sleep", side_effect=callback) as wait:
+                yield wait
+        else:
+            stop_event = Event()
+            with patch.object(module, "Event", return_value=stop_event):
+                with patch.object(stop_event, "wait", side_effect=callback) as wait:
+                    wait.return_value = False
+                    yield wait
+
     def test_rejects_unsafe_paths_before_any_download(self):
         for relative, module, factory in self.modules:
             for unsafe in UNSAFE_PATHS:
@@ -79,6 +92,9 @@ class PythonDownloaderTests(unittest.TestCase):
                     self.assertEqual((output / "raw/mkv/clip.mkv").read_bytes(), b"test")
                     self.assertFalse((output / "raw/mkv/clip.mkv.part").exists())
                     session.get.reset_mock()
+                    session.head.return_value.__enter__.return_value.headers = {
+                        "Content-Length": "4"
+                    }
                     self.assertEqual(
                         self.download(module, factory, manifest, output, session), 0
                     )
@@ -125,7 +141,7 @@ class PythonDownloaderTests(unittest.TestCase):
                             self.assertFalse(destination.exists())
                             broken.__exit__.assert_called_once()
 
-                        with patch.object(module, "sleep", side_effect=check_cleanup) as sleep:
+                        with self.retry_wait(module, check_cleanup) as sleep:
                             failures = self.download(module, factory, manifest, output, session)
                         self.assertEqual(failures, 0)
                         self.assertEqual(session.get.call_count, 2)
@@ -150,7 +166,7 @@ class PythonDownloaderTests(unittest.TestCase):
                         for _ in range(6)
                     ]
                     session.get.side_effect = broken + [self.response()]
-                    with patch.object(module, "sleep") as sleep:
+                    with self.retry_wait(module) as sleep:
                         failures = self.download(module, factory, manifest, output, session)
                     self.assertEqual(failures, 1)
                     self.assertEqual(session.get.call_count, 7)
@@ -183,7 +199,7 @@ class PythonDownloaderTests(unittest.TestCase):
                             response.raise_for_status.side_effect = error
                         session = MagicMock()
                         session.get.return_value = response
-                        with patch.object(module, "sleep") as sleep:
+                        with self.retry_wait(module) as sleep:
                             failures = self.download(module, factory, manifest, output, session)
                         self.assertEqual(failures, 1)
                         session.get.assert_called_once()
@@ -202,13 +218,126 @@ class PythonDownloaderTests(unittest.TestCase):
                     session = MagicMock()
                     response = self.response(KeyboardInterrupt(), chunks=(b"old",))
                     session.get.return_value = response
-                    with patch.object(module, "sleep") as sleep:
+                    with self.retry_wait(module) as sleep:
                         with self.assertRaises(KeyboardInterrupt):
                             self.download(module, factory, manifest, output, session)
                     sleep.assert_not_called()
                     response.__exit__.assert_called_once()
                     self.assertFalse((output / "raw/clip.mkv").exists())
                     self.assertFalse((output / "raw/clip.mkv.part").exists())
+
+    def test_vcd1_redownloads_existing_files_with_wrong_or_unknown_size(self):
+        _, module, factory = self.modules[0]
+        for size in ("4", None):
+            with self.subTest(remote_size=size):
+                with tempfile.TemporaryDirectory() as directory:
+                    base = Path(directory)
+                    manifest = base / "manifest.txt"
+                    manifest.write_text("raw/clip.mkv\n", encoding="utf-8")
+                    output = base / "output"
+                    destination = output / "raw/clip.mkv"
+                    destination.parent.mkdir(parents=True)
+                    destination.write_bytes(b"old")
+                    session = MagicMock()
+                    session.head.return_value = self.response()
+                    session.head.return_value.headers = (
+                        {"Content-Length": size} if size is not None else {}
+                    )
+                    session.get.return_value = self.response()
+                    self.assertEqual(
+                        self.download(module, factory, manifest, output, session), 0
+                    )
+                    session.head.assert_called_once()
+                    session.get.assert_called_once()
+                    self.assertEqual(destination.read_bytes(), b"test")
+                    self.assertFalse(destination.with_suffix(".mkv.part").exists())
+
+    def test_vcd1_reports_size_check_failure_without_skipping_or_overwriting(self):
+        _, module, factory = self.modules[0]
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            manifest = base / "manifest.txt"
+            manifest.write_text("raw/clip.mkv\n", encoding="utf-8")
+            output = base / "output"
+            destination = output / "raw/clip.mkv"
+            destination.parent.mkdir(parents=True)
+            destination.write_bytes(b"old")
+            session = MagicMock()
+            session.head.return_value = self.response()
+            session.head.return_value.raise_for_status.side_effect = (
+                module.requests.HTTPError("404 not found")
+            )
+            self.assertEqual(
+                self.download(module, factory, manifest, output, session), 1
+            )
+            session.get.assert_not_called()
+            self.assertEqual(destination.read_bytes(), b"old")
+
+    def test_vcd2_interrupt_stops_active_and_queued_downloads(self):
+        _, module, factory = self.modules[1]
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            manifest = base / "manifest.txt"
+            manifest.write_text(
+                "raw/active.mkv\nraw/queued1.mkv\nraw/queued2.mkv\n",
+                encoding="utf-8",
+            )
+            output = base / "output"
+            stop_event = Event()
+            started = Event()
+            session = MagicMock()
+            response = self.response()
+
+            def stream(chunk_size):
+                yield b"old"
+                started.set()
+                if not stop_event.wait(5):
+                    raise AssertionError("Worker did not receive cancellation")
+                yield b"more"
+
+            def interrupt(futures):
+                if not started.wait(5):
+                    raise AssertionError("Worker did not start")
+                raise KeyboardInterrupt()
+
+            response.iter_content.side_effect = stream
+            session.get.return_value = response
+            with patch.object(module, "Event", return_value=stop_event):
+                with patch.object(module, "as_completed", side_effect=interrupt):
+                    with self.assertRaises(KeyboardInterrupt):
+                        self.download(module, factory, manifest, output, session)
+            self.assertTrue(stop_event.is_set())
+            session.get.assert_called_once()
+            response.__exit__.assert_called_once()
+            self.assertEqual(list(output.rglob("*.part")), [])
+            self.assertEqual(list(output.rglob("*.mkv")), [])
+
+            session.get.reset_mock()
+            session.get.return_value = self.response()
+            self.assertEqual(
+                self.download(module, factory, manifest, output, session), 0
+            )
+            self.assertEqual(session.get.call_count, 3)
+            self.assertEqual(len(list(output.rglob("*.mkv"))), 3)
+
+    def test_vcd2_cancellation_interrupts_retry_backoff(self):
+        _, module, factory = self.modules[1]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            session = MagicMock()
+            session.get.return_value = self.response(
+                module.requests.ConnectionError("connection lost"), chunks=(b"old",)
+            )
+            stop_event = Event()
+            with patch.object(module, factory, return_value=session):
+                with patch.object(stop_event, "wait", return_value=True) as wait:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        with self.assertRaises(module.CancelledError):
+                            module.download_one("raw/clip.mkv", output, 1, 1, stop_event)
+            wait.assert_called_once_with(1)
+            session.get.assert_called_once()
+            self.assertEqual(list(output.rglob("*.part")), [])
+            self.assertEqual(list(output.rglob("*.mkv")), [])
 
 
 class ShellDownloaderTests(unittest.TestCase):
