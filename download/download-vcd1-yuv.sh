@@ -1,6 +1,8 @@
+#!/usr/bin/env bash
 # Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
-#!/usr/bin/bash
+# Licensed under the MIT license.
+
+set -euo pipefail
 
 BLOB_NAMES=(
 yuv420/th/54e9f7b6a15b07e90b4836eb6ffb58ae_1920x1080_30.yuv
@@ -173,28 +175,22 @@ yuv420/th-m/5c26470eb0dd19e2ce12a6cce702834c_1080x1920_30.yuv
 ###############################################################
 
 AZURE_URL="https://vcdpublic.blob.core.windows.net/vcd1"
+OUT_DIR="${OUT_DIR:-./vcd1}"
 
-mkdir -p ./vcd1
-mkdir -p ./vcd1/yuv420/th
-mkdir -p ./vcd1/yuv420/th-ob
-mkdir -p ./vcd1/yuv420/th-bb
-mkdir -p ./vcd1/yuv420/th-m
-
-for BLOB in ${BLOB_NAMES[@]}
-do
+for BLOB in "${BLOB_NAMES[@]}"; do
     URL="$AZURE_URL/$BLOB"
-    DES="./vcd1/$BLOB"
+    DES="$OUT_DIR/$BLOB"
+    TMP="$DES.part"
 
+    if [ -f "$DES" ]; then
+        echo "Skip (exists): $BLOB"
+        continue
+    fi
+
+    mkdir -p "$(dirname "$DES")"
     echo "Download: $BLOB"
-
-    # DRY RUN: print HTTP headers WITHOUT downloading the files
-    #curl -s -I "$URL" | head -n 1
-       
-
-    # Actually download the files - UNCOMMENT it when ready to download
-    curl "$URL" -o "$DES"
-
-    # Same as above, but using wget
-    # wget "$URL" -O "$BLOB"
-
+    curl --fail --location --silent --show-error \
+        --retry 5 --retry-delay 2 --retry-connrefused \
+        --continue-at - --output "$TMP" "$URL"
+    mv -f "$TMP" "$DES"
 done
